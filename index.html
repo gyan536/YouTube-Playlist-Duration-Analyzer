@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Playlist Duration Analyzer</title>
+  <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #87ceeb, #ffc0cb);
+      --text-color: #000000;
+      --card-bg: rgba(255, 255, 255, 0.85);
+      --button-bg: #6a5acd;
+      --button-text: #ffffff;
+      --speed-highlight: #000000;
+      --speed-font-size: 1.1rem;
+    }
+
+    body.dark {
+      --bg-gradient: linear-gradient(135deg, #1c1c1c, #2e2e2e);
+      --text-color: #ffffff;
+      --card-bg: rgba(30, 30, 30, 0.85);
+      --button-bg: #4444dd;
+      --button-text: #ffffff;
+      --speed-highlight: #ffffff;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: var(--bg-gradient);
+      color: var(--text-color);
+      transition: background 0.4s ease, color 0.3s;
+      min-height: 100vh;
+    }
+
+    .container {
+      padding: 2rem;
+      max-width: 1200px;
+      margin: auto;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    textarea {
+      width: 100%;
+      height: 120px;
+      margin-top: 1rem;
+      padding: 1rem;
+      border-radius: 10px;
+      border: 2px solid #ccc;
+      font-size: 1rem;
+      background: rgba(255,255,255,0.9);
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+
+    button#analyzeBtn {
+      background-color: var(--button-bg);
+      color: var(--button-text);
+      padding: 0.75rem 1.5rem;
+      border: none;
+      border-radius: 25px;
+      font-size: 1rem;
+      margin-top: 1rem;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(106, 90, 205, 0.4);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    button#analyzeBtn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 6px 20px rgba(106, 90, 205, 0.6);
+    }
+
+    .results {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+      margin-top: 2rem;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: 15px;
+      padding: 1.5rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      border-left: 5px solid #6a5acd;
+    }
+
+    .card h3 {
+      margin-top: 0;
+      margin-bottom: 0.5rem;
+    }
+
+    .card p {
+      line-height: 1.5;
+    }
+
+    .dark-toggle {
+      cursor: pointer;
+      font-size: 1rem;
+      background: none;
+      border: 1px solid var(--text-color);
+      padding: 0.5rem 1rem;
+      border-radius: 9999px;
+      color: var(--text-color);
+    }
+
+    .speed-highlight {
+      color: var(--speed-highlight);
+      font-weight: bold;
+      font-size: var(--speed-font-size);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>YouTube Playlist Analyzer</h1>
+      <button class="dark-toggle" onclick="toggleDarkMode()">🌙 Dark Mode</button>
+    </div>
+    <textarea id="playlistUrls" placeholder="Paste YouTube playlist URLs here, one per line..."></textarea>
+    <button id="analyzeBtn">🔍 Analyze</button>
+    <div class="results" id="results"></div>
+  </div>
+
+  <script>
+    const apiKey = 'AIzaSyDLfI4J0WMgMrT7m7Cl0ZewO49XGHhS3Hs';
+
+    function toggleDarkMode() {
+      document.body.classList.toggle('dark');
+    }
+
+    document.getElementById('analyzeBtn').addEventListener('click', async () => {
+      const resultsContainer = document.getElementById('results');
+      resultsContainer.innerHTML = '';
+      const urls = document.getElementById('playlistUrls').value.trim().split('\n');
+
+      for (let url of urls) {
+        const playlistId = extractPlaylistId(url);
+        if (!playlistId) continue;
+
+        const videoIds = await fetchAllVideoIds(playlistId);
+        if (!videoIds.length) continue;
+
+        const durations = await fetchDurations(videoIds);
+        const totalSeconds = durations.reduce((sum, dur) => sum + parseISO8601Duration(dur), 0);
+
+        const speeds = [1, 1.25, 1.5, 1.75, 2];
+        const formattedDurations = speeds.map(s => `<span class='speed-highlight'>${s}x</span> → ${formatSeconds(totalSeconds / s)}`).join('<br>');
+
+        const title = await fetchPlaylistTitle(playlistId);
+
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `<h3>📂 ${title}</h3><p><strong>Total Duration:</strong><br>${formattedDurations}</p>`;
+        resultsContainer.appendChild(card);
+      }
+    });
+
+    function extractPlaylistId(url) {
+      const match = url.match(/[?&]list=([a-zA-Z0-9_-]+)/);
+      return match ? match[1] : null;
+    }
+
+    async function fetchPlaylistTitle(playlistId) {
+      const res = await fetch(`https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=${playlistId}&key=${apiKey}`);
+      const data = await res.json();
+      return data.items?.[0]?.snippet?.title || 'Unknown Playlist';
+    }
+
+    async function fetchAllVideoIds(playlistId) {
+      let ids = [], nextPageToken = '';
+      do {
+        const res = await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=50&playlistId=${playlistId}&pageToken=${nextPageToken}&key=${apiKey}`);
+        const data = await res.json();
+        nextPageToken = data.nextPageToken || '';
+        ids.push(...data.items.map(i => i.contentDetails.videoId));
+      } while (nextPageToken);
+      return ids;
+    }
+
+    async function fetchDurations(videoIds) {
+      const chunks = [];
+      for (let i = 0; i < videoIds.length; i += 50) {
+        const batch = videoIds.slice(i, i + 50).join(',');
+        chunks.push(
+          fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${batch}&key=${apiKey}`)
+            .then(res => res.json())
+            .then(data => data.items.map(v => v.contentDetails.duration))
+        );
+      }
+      const results = await Promise.all(chunks);
+      return results.flat();
+    }
+
+    function parseISO8601Duration(duration) {
+      const regex = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/;
+      const [, h = 0, m = 0, s = 0] = duration.match(regex).map(x => parseInt(x) || 0);
+      return h * 3600 + m * 60 + s;
+    }
+
+    function formatSeconds(seconds) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = Math.floor(seconds % 60);
+      return `${h}h ${m}m ${s}s`;
+    }
+  </script>
+</body>
+</html>
